@@ -176,7 +176,7 @@ def cargar_y_limpiar_datos_cloud():
 # INTERFAZ DE USUARIO DEL DASHBOARD
 # ==========================================
 
-st.title("📊 Diagnóstico en Tiempo Real: Síndrome de Burnout (MBI)")
+st.title("Análisis de encuestas Maslach Burnout Inventory (MBI)")
 st.caption("🔄 Sincronizado directamente con los formularios en la nube de Google Sheets")
 # ... (código previo)
 df_limpio = cargar_y_limpiar_datos_cloud()
@@ -234,8 +234,7 @@ else:
     # =========================================================
     st.subheader("🕸️ Perfil Biopsicosocial Integral (Gráfico de Araña)")
     st.markdown("""
-    Este gráfico representa el **'ADN' demográfico y de riesgo** del personal. Cada eje representa el porcentaje 
-    (de 0% a 100%) en el que el grupo seleccionado cumple con los criterios clínicos de Burnout (Maslach), 
+    Cada eje representa el porcentaje (de 0% a 100%) en el que el grupo seleccionado cumple con los criterios clínicos de Burnout (Maslach), 
     distribución por género y concentración por rangos de edad. 
     *Pasa el cursor sobre los puntos para ver las cifras exactas.*
     """)
