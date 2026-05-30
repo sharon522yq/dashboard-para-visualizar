@@ -344,6 +344,7 @@ else:
                     tickfont=dict(size=12, color="#E0E0E0"), 
                     gridcolor="rgba(128, 128, 128, 0.2)",
                     linecolor="rgba(128, 128, 128, 0.2)",
+                    tickcolor="rgba(128, 128, 128, 0.2)",
                 ),
                 angularaxis=dict(
                     tickfont=dict(size=14, color="white", weight="bold"), 
