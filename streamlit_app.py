@@ -1,0 +1,384 @@
+import streamlit as st
+import pandas as pd
+import numpy as np
+import requests
+from io import BytesIO
+import plotly.graph_objects as go
+from streamlit_autorefresh import st_autorefresh
+
+# Configuración inicial de la página de Streamlit
+st.set_page_config(page_title="Dashboard Maslach Burnout Inventory", layout="wide")
+st_autorefresh(interval=300_000, key="auto_refresh_dashboard") 
+
+def limpiar_y_homologar_formacion(texto):
+    """
+    Función inteligente con limpieza extrema de género, especialidades médicas
+    y respuestas genéricas (ej. 'Licenciada').
+    """
+    txt = str(texto).lower().strip()
+    
+    # 1. Eliminar textos basura
+    valores_basura = ['nan', 'none', 'no especificado', 'prefiero no decirlo']
+    if txt in valores_basura or txt.replace('.0', '').isdigit():
+        return 'No especificado'
+        
+    # 2. Agrupación por palabras clave - ORDEN ESTRICTO
+    # -- ÁREA SALUD --
+    if 'enfer' in txt: return 'Enfermería'
+    if 'pasan' in txt or 'interna' in txt: return 'Pasantes / Internos'
+    
+    if any(k in txt for k in ['medici', 'médici', 'médico', 'medico', 'médica', 'medica', 'cirujan', 'pediatra']):
+        return 'Medicina'
+        
+    if 'odont' in txt or 'dentist' in txt: return 'Odontología'
+    if 'fisio' in txt: return 'Fisioterapia'
+    if 'nutri' in txt: return 'Nutrición'
+    if 'psico' in txt: return 'Psicología'
+    if any(k in txt for k in ['quimi', 'quími', 'qfb']): return 'Química / Laboratorio'
+    
+    # -- ÁREA SOCIAL Y ADMINISTRATIVA --
+    if 'derech' in txt or 'aboga' in txt: return 'Derecho'
+    if 'admin' in txt: return 'Administrativo'
+    if 'conta' in txt: return 'Contabilidad / Finanzas'
+    if 'trabajo s' in txt: return 'Trabajo Social'
+    if 'docen' in txt or 'maestr' in txt: return 'Docente'
+    if 'estud' in txt: return 'Estudiantes'
+    
+    # -- ÁREA INGENIERÍA Y TECNOLOGÍA --
+    if 'ingenier' in txt or 'civil' in txt: return 'Ingeniería Civil'
+    if any(k in txt for k in ['sistem', 'tecnolog', 'informát']): return 'Tecnología y Sistemas'
+    
+    # -- FILTRO FINAL: RESPUESTAS GENÉRICAS --
+    if 'licencia' in txt or 'lic.' in txt:
+        return 'Licenciatura (General)'
+        
+    return str(texto).strip().capitalize()
+
+
+# 💡 ESTA ES LA CLAVE DEL TIEMPO REAL:
+@st.cache_data(ttl=60)
+def cargar_y_limpiar_datos_cloud():
+    urls_originales = [
+        "https://docs.google.com/spreadsheets/d/1DN1fs15Q9HjX7ajbsQdx6GHurestCf62YA4QBALkchg/edit?usp=sharing",
+        "https://docs.google.com/spreadsheets/d/1nBDVyC9BhXMfs0eeHgh3-2vyj9JxD5RDGY-TGZBIODs/edit?usp=sharing"
+    ]
+    
+    lista_dataframes = []
+    urls_exportacion = []
+    
+    for url in urls_originales:
+        try:
+            id_documento = url.split("/d/")[1].split("/")[0]
+            url_xlsx = f"https://docs.google.com/spreadsheets/d/{id_documento}/export?format=xlsx"
+            urls_exportacion.append(url_xlsx)
+        except Exception:
+            continue
+
+    for idx, url_cloud in enumerate(urls_exportacion):
+        try:
+            respuesta = requests.get(url_cloud)
+            if respuesta.status_code != 200:
+                continue
+            
+            excel_completo = pd.ExcelFile(BytesIO(respuesta.content), engine='openpyxl')
+            nombres_hojas = excel_completo.sheet_names
+        except Exception:
+            continue
+            
+        for hoja in nombres_hojas:
+            try:
+                df = pd.read_excel(excel_completo, sheet_name=hoja)
+            except Exception:
+                continue
+                
+            if df.empty:
+                continue
+                
+            df.columns = df.columns.str.strip()
+            
+            # Identificación flexible de columnas
+            col_sexo = [c for c in df.columns if 'sexo' in c.lower() or c.lower() == 'columna 1']
+            col_edad = [c for c in df.columns if 'edad' in c.lower()]
+            col_formacion = [c for c in df.columns if 'formación' in c.lower() or 'formacion' in c.lower()]
+            
+            if col_sexo: df.rename(columns={col_sexo[0]: 'Sexo'}, inplace=True)
+            if col_edad: df.rename(columns={col_edad[0]: 'Edad'}, inplace=True)
+            if col_formacion: df.rename(columns={col_formacion[0]: 'Formacion'}, inplace=True)
+            
+            if 'Sexo' not in df.columns: df['Sexo'] = 'No especificado'
+            if 'Edad' not in df.columns: df['Edad'] = 'No especificado'
+            if 'Formacion' not in df.columns: df['Formacion'] = 'No especificado'
+
+            # Extracción de las 3 dimensiones del MBI
+            col_agotamiento_tot = [c for c in df.columns if 'AGOTAMIENTO' in c.upper() or 'Agotamiento' in c]
+            col_desp_tot = [c for c in df.columns if 'DESPERSONALIZACIÓN' in c.upper() or 'Desp' in c]
+            col_realiz_tot = [c for c in df.columns if 'REALIZACIÓN' in c.upper() or 'Realiz' in c]
+            
+            if col_agotamiento_tot and col_desp_tot and col_realiz_tot:
+                df['Agotamiento'] = pd.to_numeric(df[col_agotamiento_tot[0]], errors='coerce')
+                df['Desp'] = pd.to_numeric(df[col_desp_tot[0]], errors='coerce')
+                df['Realiz'] = pd.to_numeric(df[col_realiz_tot[0]], errors='coerce')
+            else:
+                columnas_numericas = df.select_dtypes(include=[np.number])
+                if columnas_numericas.shape[1] >= 3:
+                    df['Agotamiento'] = columnas_numericas.iloc[:, -3]
+                    df['Desp'] = columnas_numericas.iloc[:, -2]
+                    df['Realiz'] = columnas_numericas.iloc[:, -1]
+                else:
+                    continue
+            
+            df['Lugar_Encuesta'] = hoja.strip()
+            df['Archivo_Origen'] = f"GoogleSheet_Doc_{idx + 1}"
+            
+            columnas_finales = ['Sexo', 'Edad', 'Formacion', 'Agotamiento', 'Desp', 'Realiz', 'Lugar_Encuesta', 'Archivo_Origen']
+            df_final = df[columnas_finales].copy()
+            df_final.dropna(subset=['Agotamiento', 'Desp', 'Realiz'], inplace=True)
+            lista_dataframes.append(df_final)
+
+    if not lista_dataframes:
+        return pd.DataFrame() 
+
+    # Consolidación global
+    consolidado = pd.concat(lista_dataframes, ignore_index=True)
+    
+    # Filtros de limpieza profunda inmediatas en la nube
+    termino_duplicado = "Copia de MaslachBurnout Invento"
+    consolidado = consolidado[~consolidado['Lugar_Encuesta'].astype(str).str.contains(termino_duplicado, case=False, na=False)]
+    
+    for col in ['Sexo', 'Edad', 'Formacion', 'Lugar_Encuesta']:
+        consolidado = consolidado[~consolidado[col].astype(str).str.contains('%', na=False)]
+        consolidado = consolidado[~consolidado[col].astype(str).str.lower().str.contains('cumplimiento', na=False)]
+        consolidado = consolidado[~consolidado[col].astype(str).str.lower().str.contains('total', na=False)]
+        consolidado = consolidado[~consolidado[col].astype(str).str.lower().str.contains('promedio', na=False)]
+
+    consolidado['Formacion'] = consolidado['Formacion'].apply(limpiar_y_homologar_formacion)
+    consolidado['Sexo'] = consolidado['Sexo'].astype(str).str.strip().str.capitalize()
+    consolidado['Edad'] = consolidado['Edad'].astype(str).str.strip()
+    
+    valores_nulos_texto = ['Nan', 'None', 'No especificado', 'Prefiero no decirlo']
+    consolidado = consolidado[~consolidado['Sexo'].isin(valores_nulos_texto)]
+    consolidado = consolidado[~consolidado['Formacion'].isin(valores_nulos_texto)]
+    consolidado = consolidado[~consolidado['Sexo'].str.replace('.0', '', regex=False).str.isdigit()]
+
+    # ¡CORREGIDO AQUÍ! (Cambiado consolidated -> consolidado)
+    consolidado['Agotamiento'] = pd.to_numeric(consolidado['Agotamiento'], errors='coerce')
+    consolidado['Desp'] = pd.to_numeric(consolidado['Desp'], errors='coerce')
+    consolidado['Realiz'] = pd.to_numeric(consolidado['Realiz'], errors='coerce')
+    consolidado.dropna(subset=['Agotamiento', 'Desp', 'Realiz'], inplace=True)
+    
+    consolidado['Agotamiento'] = consolidado['Agotamiento'].astype(int)
+    consolidado['Desp'] = consolidado['Desp'].astype(int)
+    consolidado['Realiz'] = consolidado['Realiz'].astype(int)
+    
+    consolidado.sort_values(by=['Formacion', 'Lugar_Encuesta'], inplace=True)
+    return consolidado
+
+
+# ==========================================
+# INTERFAZ DE USUARIO DEL DASHBOARD
+# ==========================================
+
+col_titulo, col_boton = st.columns([5, 1])
+with col_titulo:
+    st.title("Análisis de encuestas Maslach Burnout Inventory (MBI)")
+with col_boton:
+    st.write("")
+    if st.button("🔄 Actualizar datos", use_container_width=True):
+        cargar_y_limpiar_datos_cloud.clear()
+        st.rerun()
+
+ultima_actualizacion = pd.Timestamp.now().strftime('%d/%m/%Y %H:%M:%S')
+st.caption(f"⏱️ Datos cargados a las: **{ultima_actualizacion}** · Se actualizan automáticamente cada 5 minutos")
+
+
+    
+    # --- 1. CARGA ---
+df_limpio = cargar_y_limpiar_datos_cloud()
+
+# --- 2. LÓGICA DE SUMA ESPECÍFICA (LA "FUENTE DE VERDAD") ---
+hojas_deseadas = ['MaslachBurnout Inventory', 'Respuestas de formulario 1']
+
+# Filtramos para quedarnos solo con estas dos hojas
+df_base = df_limpio[df_limpio['Lugar_Encuesta'].isin(hojas_deseadas)].copy()
+
+# Desduplicamos basándonos en las respuestas para que la suma sea real
+# (Asumiendo que si coinciden estos datos, es la misma encuesta)
+columnas_clave = ['Sexo', 'Edad', 'Formacion', 'Agotamiento', 'Desp', 'Realiz', 'Lugar_Encuesta']
+df_base_unico = df_base.drop_duplicates(subset=columnas_clave, keep='last')
+
+# --- 3. FILTRO DE CENTROS ---
+st.subheader("🔍 Filtros de Consulta General")
+
+# Lista de hospitales única, excluyendo las hojas maestras para el menú desplegable
+hospitales_disponibles = sorted([h for h in df_limpio['Lugar_Encuesta'].unique() 
+                                 if h not in hojas_deseadas and pd.notna(h)])
+
+hospital_seleccionado = st.selectbox(
+    "Selecciona un Centro de Salud para auditar:", 
+    ["Todos los centros"] + hospitales_disponibles, 
+    key="filtro_principal"
+)
+
+# --- 4. ASIGNACIÓN FINAL DE DF_FILTRADO ---
+if hospital_seleccionado == "Todos los centros":
+    df_filtrado = df_base_unico
+else:
+    df_filtrado = df_limpio[df_limpio['Lugar_Encuesta'] == hospital_seleccionado].copy()
+
+# --- 5. MÉTRICAS (Basadas en df_filtrado) ---
+col1, col2, col3 = st.columns(3)
+with col1:
+    st.metric(label="📋 Total de Encuestas Válidas", value=len(df_filtrado))
+with col2:
+    n_centros = 1 if hospital_seleccionado != "Todos los centros" else df_base_unico['Lugar_Encuesta'].nunique()
+    st.metric(label="🏥 Hojas Consolidadas", value=n_centros)
+with col3:
+    st.metric(label="🎓 Carreras Homologadas", value=df_filtrado['Formacion'].nunique())
+    
+    
+    
+st.divider()
+    
+
+   
+     
+    
+
+    
+    # =========================================================
+    # RENDERIZADO DEL GRÁFICO DE RADAR COMPARATIVO E INTEGRAL
+    # =========================================================
+st.subheader("🕸️ Perfil Biopsicosocial Integral (Gráfico de Araña)")
+st.markdown("""
+Cada eje representa el porcentaje (de 0% a 100%) en el que el grupo seleccionado cumple con los criterios clínicos de Burnout (Maslach), 
+    distribución por género y concentración por rangos de edad. 
+    *Pasa el cursor sobre los puntos para ver las cifras exactas.*
+ """)
+
+rangos_edad_eje = sorted([r for r in df_limpio['Edad'].unique() if str(r).lower() not in ['no especificado', 'nan', 'none']])
+    
+ejes_base = [
+        'Agotamiento Emocional (Riesgo >26)', 
+        'Despersonalización (Riesgo >9)', 
+        'Baja Realización Personal (Riesgo <34)',
+        'Género: Hombre',
+        'Género: Mujer'
+ ] + [f"Edad: {r}" for r in rangos_edad_eje]
+
+todas_carreras = list(df_filtrado['Formacion'].unique())
+carreras_default = list(df_filtrado['Formacion'].value_counts().nlargest(2).index)
+
+carreras_seleccionadas = st.multiselect(
+        "Selecciona las profesiones/formaciones que deseas comparar simultáneamente en el radar:",
+        options=todas_carreras,
+        default=carreras_default if carreras_default else todas_carreras[:1]
+)
+
+if not carreras_seleccionadas:
+        st.warning("⚠️ Por favor, selecciona al menos una profesión para desplegar la telaraña comparativa.")
+else:
+        fig_radar = go.Figure()
+        colores_capas = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2']
+        datos_tabla_resumen = []
+
+for i, carrera in enumerate(carreras_seleccionadas):
+            subset_carrera = df_filtrado[df_filtrado['Formacion'] == carrera]
+            if subset_carrera.empty:
+                continue
+                
+            n_muestra = len(subset_carrera)
+            
+            # 1. Cálculo de frecuencias absolutas (Números Exactos)
+            n_agot = (subset_carrera['Agotamiento'] > 26).sum()
+            n_desp = (subset_carrera['Desp'] > 9).sum()
+            n_real = (subset_carrera['Realiz'] < 34).sum()
+            n_hombre = (subset_carrera['Sexo'] == 'Hombre').sum()
+            n_mujer = (subset_carrera['Sexo'] == 'Mujer').sum()
+            
+            # 2. Cálculo de Porcentajes
+            p_agot = (n_agot / n_muestra) * 100 if n_muestra > 0 else 0
+            p_desp = (n_desp / n_muestra) * 100 if n_muestra > 0 else 0
+            p_real = (n_real / n_muestra) * 100 if n_muestra > 0 else 0
+            p_hombre = (n_hombre / n_muestra) * 100 if n_muestra > 0 else 0
+            p_mujer = (n_mujer / n_muestra) * 100 if n_muestra > 0 else 0
+            
+            # 3. Listas para los rangos de edad (Porcentajes y Números)
+            valores_edad_pct = []
+            valores_edad_num = []
+            
+            for r in rangos_edad_eje:
+                n_edad = (subset_carrera['Edad'] == r).sum()
+                p_edad = (n_edad / n_muestra) * 100 if n_muestra > 0 else 0
+                valores_edad_pct.append(p_edad)
+                valores_edad_num.append(n_edad)
+                
+            # 4. Consolidación de ejes para Plotly
+            valores_ejes = [p_agot, p_desp, p_real, p_hombre, p_mujer] + valores_edad_pct
+            
+            # Textos personalizados para el Hover del gráfico
+            text_ejes = [
+                f"{n_agot} de {n_muestra} personas",
+                f"{n_desp} de {n_muestra} personas",
+                f"{n_real} de {n_muestra} personas",
+                f"{n_hombre} hombres",
+                f"{n_mujer} mujeres"
+            ] + [f"{num} personas" for num in valores_edad_num]
+            
+            # 5. Agregar datos combinados a la Tabla Resumen
+            datos_tabla_resumen.append({
+                "Profesión / Formación": carrera,
+                "Muestra (N)": n_muestra,
+                "Agotamiento (% y Casos)": f"{p_agot:.1f}% ({n_agot})",
+                "Despersonalización (% y Casos)": f"{p_desp:.1f}% ({n_desp})",
+                "Baja Realización (% y Casos)": f"{p_real:.1f}% ({n_real})",
+                "Hombres (% y Casos)": f"{p_hombre:.1f}% ({n_hombre})",
+                "Mujeres (% y Casos)": f"{p_mujer:.1f}% ({n_mujer})"
+            })
+            
+            # Cierre geométrico de la silueta del radar
+            valores_cerrados = valores_ejes + [valores_ejes[0]]
+            text_cerrados = text_ejes + [text_ejes[0]]
+            ejes_cerrados = ejes_base + [ejes_base[0]]
+            
+            fig_radar.add_trace(go.Scatterpolar(
+                r=valores_cerrados,
+                theta=ejes_cerrados,
+                text=text_cerrados, # Inyectamos las cifras exactas aquí
+                hovertemplate="<b>%{theta}</b><br>Proporción: %{r:.1f}%<br>Casos exactos: %{text}<extra></extra>",
+                fill='toself',
+                name=f"{carrera} (N={n_muestra})",
+                line=dict(color=colores_capas[i % len(colores_capas)], width=2.5),
+                opacity=0.35
+            ))
+            
+fig_radar.update_layout(
+            polar=dict(
+                radialaxis=dict(
+                    visible=True,
+                    range=[0, 100],
+                    tickfont=dict(size=12, color="#E0E0E0"), 
+                    gridcolor="rgba(128, 128, 128, 0.2)",
+                    linecolor="rgba(128, 128, 128, 0.2)",
+                    tickcolor="rgba(128, 128, 128, 0.2)",
+                ),
+                angularaxis=dict(
+                    tickfont=dict(size=14, color="white", weight="bold"), 
+                    gridcolor="rgba(128, 128, 128, 0.2)",
+                    linecolor="rgba(64, 64, 64, 0.2)"
+                   
+                )
+            ),
+            font=dict(color="white", family="Arial"), # Color general de la gráfica
+            paper_bgcolor="rgba(0,0,0,0)", # Vuelve transparente el fondo exterior
+            plot_bgcolor="rgba(0,0,0,0)",  # Vuelve transparente el fondo interior
+            margin=dict(l=40, r=40, t=40, b=40) # Da un poco de respiro a los bordes
+        )
+        
+        
+        
+st.plotly_chart(fig_radar, use_container_width=True, theme= None)
+st.subheader("📊 Tabla Analítica de Riesgos de Desgaste Ocupacional")
+st.markdown("Desglose cuantitativo exacto y proporcional correspondiente a las siluetas del radar:")
+st.table(pd.DataFrame(datos_tabla_resumen).set_index("Profesión / Formación")) 
+        
+  
