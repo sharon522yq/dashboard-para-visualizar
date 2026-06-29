@@ -244,14 +244,13 @@ else:
     df_filtrado = df_limpio[df_limpio['Lugar_Encuesta'] == hospital_seleccionado].copy()
 
 # --- 5. MÉTRICAS (Basadas en df_filtrado) ---
-col1, col2, col3 = st.columns(3)
+col1,  col2 = st.columns(2)
 with col1:
     st.metric(label="📋 Total de Encuestas Válidas", value=len(df_filtrado))
+
+    
 with col2:
-    n_centros = 1 if hospital_seleccionado != "Todos los centros" else df_base_unico['Lugar_Encuesta'].nunique()
-    st.metric(label="🏥 Hojas Consolidadas", value=n_centros)
-with col3:
-    st.metric(label="🎓 Carreras Homologadas", value=df_filtrado['Formacion'].nunique())
+    st.metric(label="🎓 Carreras Homologadas", value=df_filtrado['Formacion'].nunique()) 
     
     
     
