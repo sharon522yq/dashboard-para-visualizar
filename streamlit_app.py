@@ -16,13 +16,13 @@ col_izq, col_titulo, col_der = st.columns([1, 4, 1])
 
 with col_izq:
     # Asegúrate de que el archivo exista en tu carpeta o usa la ruta correcta
-    st.image("Bioética/cobiet.png", width=200) 
+    st.image("cobiet.png", width=200) 
 
 with col_titulo:
     st.markdown("<h1 style='text-align: center;'>COMISIÓN DE BIOÉTICA DEL ESTADO DE TLAXCALA</h1>", unsafe_allow_html=True)
 
 with col_der:
-    st.image("Bioética/sesa.jpg", width=200)
+    st.image("sesa.jpg", width=200)
 
 st.divider() # Línea para separar el encabezado del resto del contenido
 
