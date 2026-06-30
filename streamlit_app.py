@@ -71,6 +71,18 @@ def limpiar_y_homologar_formacion(texto):
         return 'Licenciatura (General)'
         
     return str(texto).strip().capitalize()
+def limpiar_edad(valor):
+    """
+    Homologa la columna Edad. Si la respuesta contiene varios rangos
+    separados por coma (selección múltiple inválida), se descarta
+    para que no genere una categoría falsa en el radar.
+    """
+    txt = str(valor).strip()
+    
+    if ',' in txt:
+        return 'No especificado'
+        
+    return txt
 
 
 # 💡 ESTA ES LA CLAVE DEL TIEMPO REAL:
@@ -171,7 +183,7 @@ def cargar_y_limpiar_datos_cloud():
 
     consolidado['Formacion'] = consolidado['Formacion'].apply(limpiar_y_homologar_formacion)
     consolidado['Sexo'] = consolidado['Sexo'].astype(str).str.strip().str.capitalize()
-    consolidado['Edad'] = consolidado['Edad'].astype(str).str.strip()
+    consolidado['Edad'] = consolidado['Edad'].apply(limpiar_edad)
     
     valores_nulos_texto = ['Nan', 'None', 'No especificado', 'Prefiero no decirlo']
     consolidado = consolidado[~consolidado['Sexo'].isin(valores_nulos_texto)]
